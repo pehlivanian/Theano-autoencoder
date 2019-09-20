@@ -47,7 +47,7 @@ class dA(object):
         decoder_activation_fn='tanh',
         initialize_W_as_identity=False,
         initialize_W_prime_as_W_transpose=False,
-        add_noise_to_W=True,
+        add_noise_to_W=False,
         noise_limit=0.01,
     ):
         """
@@ -272,6 +272,14 @@ class dA(object):
         '''
         tilde_x = self._get_corrupted_input(self.x, corruption_level)        
         y = self._get_hidden_values(tilde_x)
+        z = self._get_reconstructed_input(y)
+        return z
+
+    def predict_from_input(self, input, corruption_level=0.):
+        ''' Unsupervised problem
+        '''
+        tilde_input = self._get_corrupted_input( input, corruption_level)
+        y = self._get_hidden_values(tilde_input)
         z = self._get_reconstructed_input(y)
         return z
     

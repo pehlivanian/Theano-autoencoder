@@ -173,3 +173,72 @@ class rmsprop_solver( solver ):
             updates.append(cache_updates)
 
         return (cost, updates)
+
+class neg_feedback_solver( solver ):
+    ''' Negative feedback solver decorator.
+
+        :type learning_Rate: float
+        
+        :cost_fn: str
+        :param cost_fn: one of 'mse', 'cross-entropy'
+    '''
+
+    def __init__(self,
+                 decorated,
+                 learning_rate=0.01,
+                 cost_fn='MSE',
+                 *args,
+                 **kwargs
+                 ):
+
+        super( neg_feedback_solver, self).__init__(decorated)
+        
+        self.x = self.decorated.x
+        self.y = self.decorated.y
+        self.learning_rate = learning_rate
+        self.cost_fn = cost_fn
+
+    def compute_cost_updates(self, *a, **k):
+
+        '''
+
+        Negative feedback update
+        
+        Parameters
+        ----------
+
+        Returns
+        -------
+        tuple
+        returns cost and a list of updates for the required parameters
+        
+        
+        '''
+
+        # Works
+        # z = self.predict_from_input(self.x)
+        # L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
+        # cost = T.mean(L)
+        # grads = T.grad(cost, self.decorated.params)
+
+        # XXX
+        # Works?
+        z = self.decorated.predict_from_input(self.x - self.decorated.predict(*a, **k)) - self.decorated.predict(*a, **k)
+        L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
+        cost = T.mean(L)
+        grads = T.grad(cost, self.decorated.params)
+
+        
+        if self.cost_fn.upper() == 'MSE':
+            L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
+        elif self.cost_fn.upper() in [ 'CROSS-ENTROPY', 'CROSS_ENTROPY' ]:
+            L = T.sum( self.y * T.log(z) + (1-self.y) * T.log(1-z), axis=1)
+        cost = T.mean(L)
+        
+        grads = T.grad(cost, self.decorated.params)
+
+        updates = [ (param, param - self.learning_rate * grad)
+                    for param, grad in zip(self.decorated.params, grads) ]
+        
+        return (cost, updates)
+        

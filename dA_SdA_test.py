@@ -13,33 +13,33 @@ from theano_utils import gd_solver, rmsprop_solver
 import dA
 
 def test_dA_SdA(
-    train_set_x0=None,                   # training set
-    training_epochs=1000,                # training epochs
-    pretraining_epochs=1000,             # pretraining epochs    
-    n_visible=10,                        # num visible layers ~ input dim
-    dA_layers_sizes=[8, 6, 4,],          # dA layer sizes, also mlp layer sizes
-    symmetric=False,                     # symmetric 
-    corruption_levels=[0.],              # corruption leves for pretraining
-    n_trials=1000,                       # num trials in input data
-    batch_size=20,                       #  batch size for mini-batches
-    tie_weights=True,                    # tie weights in pretraining step
-    tie_biases=False,                    # tie biases in pretraining step
-    encoder_activation_fn='tanh',        # encoder activation fns, by layer       
-    decoder_activation_fn='tanh',        # decoder activation fns, by layer
-    global_decoder_activation_fn='tanh', # decoder activation for final step, to reconstruct input
-    initialize_W_as_identity=False,      # initial W is identity, if n_visible=dA_training_layers[-1]
+    train_set_x0=None,                         # training set
+    training_epochs=1000,                      # training epochs
+    pretraining_epochs=1000,                   # pretraining epochs    
+    n_visible=10,                              # num visible layers ~ input dim
+    dA_layers_sizes=[8, 6, 4,],                # dA layer sizes, also mlp layer sizes
+    symmetric=False,                           # symmetric 
+    corruption_levels=[0.],                    # corruption leves for pretraining
+    n_trials=1000,                             # num trials in input data
+    batch_size=20,                             #  batch size for mini-batches
+    tie_weights=True,                          # tie weights in pretraining step
+    tie_biases=False,                          # tie biases in pretraining step
+    encoder_activation_fn='tanh',              # encoder activation fns, by layer       
+    decoder_activation_fn='tanh',              # decoder activation fns, by layer
+    global_decoder_activation_fn='tanh',       # decoder activation for final step, to reconstruct input
+    initialize_W_as_identity=False,            # initial W is identity, if n_visible=dA_training_layers[-1]
     initialize_W_prime_as_W_transpose=False,   # initial W_prime is W.T, mostly for debugging
-    add_noise_to_W=True,                 # add noise to initial W
-    noise_limit=0.01,                    # noise limit for uniform W0 noise
-    pretrain_solver='rmsprop',           # pretraining solver type
-    finetune_solver='gd',                # finetuning solver type
+    add_noise_to_W=True,                       # add noise to initial W
+    noise_limit=0.01,                          # noise limit for uniform W0 noise
+    pretrain_solver='rmsprop',                 # pretraining solver type
+    finetune_solver='gd',                      # finetuning solver type
     pretrain_solver_kwargs=dict(eta=1.e-2,beta=.8,epsilon=1.e-6),  # for rmsprop, gd solvers
     finetune_solver_kwargs=dict(learning_rate=0.001)               # for rmsprop, gd solvers
     ):
 
-    ######################
-    # SYMMETRICSDA TESTS #
-    ######################
+    ####################################
+    # SYMMETRIC/NONSYMMETRIC SDA TESTS #
+    ####################################
     numpy_rng = numpy.random.RandomState(1349)
     theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
 
@@ -76,7 +76,7 @@ def test_dA_SdA(
                                 borrow=True
                                 )
 
-    multidA = dA.symmetricSdA(
+    multidA = dA.SdA(
         numpy_rng=numpy_rng,
         theano_rng=theano_rng,
         input=x,
@@ -132,6 +132,9 @@ def test_dA_SdA(
         import pdb
         pdb.set_trace()
     
+    ########################################
+    # END SYMMETRIC/NONSYMMETRIC SDA TESTS #
+    ########################################
 
     ############
     # PRETRAIN #
@@ -165,6 +168,9 @@ def test_dA_SdA(
     ############
     # FINETUNE #
     ############
+
+    import pdb
+    pdb.set_trace()
 
     if finetune_solver == 'gd':
         solver = gd_solver(multidA, **finetune_solver_kwargs)
@@ -276,19 +282,19 @@ def test_dA_SdA(
     
 if __name__ == '__main__':
     
-    n_visible = 100
-    n_trials = 10000
+    n_visible = 10
+    n_trials = 1000
     batch_size = 100
     pretraining_epochs = 10000
     training_epochs = 10000
 
-    dA_layers_sizes = [75, 50]
+    dA_layers_sizes = [8, 6]
     corruption_levels=[0.]
     symmetric=False
 
     tie_weights = False
     tie_biases = False
-    encoder_activiation_fn = 'tanh'
+    encoder_activation_fn = 'tanh'
     decoder_activation_fn = 'tanh'
     global_decoder_activation_fn = 'tanh'
 
@@ -312,7 +318,7 @@ if __name__ == '__main__':
 
     numpy_rng = numpy.random.RandomState(5492)
     
-    t     = numpy.linspace(0.05, 1.0001, 20)
+    t     = numpy.linspace(0.05, 1.0001, n_visible)
     z     = numpy_rng.uniform(low=0.05, high=4.0, size=(n_trials,1))
     theta = numpy_rng.uniform(low=0.3, high=1.3, size=(n_trials,1))
     x     = (z * numpy.sin(theta)) * t + (t**2 / z) * numpy.cos(theta)
@@ -321,7 +327,7 @@ if __name__ == '__main__':
         train_set_x0=x,
         training_epochs=training_epochs,
         n_visible=n_visible,
-        dA_layers_sizes=dA_layers,
+        dA_layers_sizes=dA_layers_sizes,
         corruption_levels=corruption_levels,
         n_trials=n_trials,
         symmetric=symmetric,
@@ -330,7 +336,7 @@ if __name__ == '__main__':
         tie_biases=tie_biases,
         encoder_activation_fn=encoder_activation_fn,
         decoder_activation_fn=decoder_activation_fn,
-        global_decoder_activation_fn=global_activation_fn,
+        global_decoder_activation_fn=global_decoder_activation_fn,
         initialize_W_as_identity=initialize_W_as_identity,
         initialize_W_prime_as_W_transpose=initialize_W_prime_as_W_transpose,
         add_noise_to_W=add_noise_to_W,
