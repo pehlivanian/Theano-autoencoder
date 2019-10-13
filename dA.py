@@ -179,7 +179,7 @@ class dA(object):
                     )
             W_prime = theano.shared(value=initial_W_prime, name='W_prime', borrow=True)
         else:
-            initial_W_prime = W.T.get_value()
+            initial_W_prime = W.get_value().transpose()
 
         if not b:
             if initial_b is None:
@@ -288,6 +288,8 @@ class dA(object):
             return T.tanh(T.dot(input, self.W) + self.b)
         elif self.encoder_activation_fn == 'sigmoid':
             return T.nnet.sigmoid(T.dot(input, self.W) + self.b)
+        elif self.encoder_activation_fn == 'symmetric_sigmoid':
+            return -1 + 2 * T.nnet.sigmoid(T.dot(input, self.W) + self.b)
         elif self.encoder_activation_fn == 'identity':
             return T.dot(input, self.W) + self.b
         else:
@@ -299,6 +301,8 @@ class dA(object):
             return T.tanh(T.dot(hidden, self.W_prime) + self.b_prime)
         elif self.decoder_activation_fn == 'sigmoid':
             return T.nnet.sigmoid(T.dot(hidden, self.W_prime) + self.b_prime)
+        elif self.decoder_activation_fn == 'symmetric_sigmoid':
+            return -1 + 2 * T.nnet.sigmoid(T.dot(hidden, self.W_prime) + self.b_prime)
         elif self.decoder_activation_fn == 'identity':
             return T.dot(hidden, self.W_prime) + self.b_prime
         else:
@@ -339,6 +343,9 @@ def _get_activation(fn_name):
         return T.tanh
     elif fn_name == 'sigmoid':
         return T.nnet.sigmoid
+    elif fn_name == 'symmetric_sigmoid':
+        return lambda x: -1 + 2 * T.nnet.sigmoid(x)
+        # return -1 + 2 * T.nnet.sigmoid
     elif fn_name == 'identity':
         return lambda x: x
     else:
@@ -469,6 +476,8 @@ class SdA(object):
             self.solver = theano_utils.gd_solver
         elif solver_type == 'rmsprop':
             self.solver = theano_utils.rmsprop_solver
+        elif solver_type == 'negative_feedback':
+            self.solver = theano_utils.negative_feedback_solver
         else:
             raise RuntimeError('Solver type %s not supported' & (solver_type,))
         self.solver_kwargs = solver_kwargs
@@ -634,6 +643,8 @@ class SdA(object):
             return T.tanh(T.dot(hidden, self.W_prime) + self.b_prime)
         elif self.global_decoder_activation_fn == 'sigmoid':
             return T.nnet.sigmoid(T.dot(hidden, self.W_prime) + self.b_prime)
+        elif self.global_decoder_activation_fn == 'symmetric_sigmoid':
+            return -1 + 2 * T.nnet.sigmoid(T.dot(hidden, self.W_prime) + self.b_prime)
         elif self.global_decoder_activation_fn == 'identity':
             return T.dot(hidden, self.W_prime) + self.b_prime
         else:

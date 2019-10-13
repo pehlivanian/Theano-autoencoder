@@ -9,7 +9,7 @@ import theano
 import theano.tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
 
-from theano_utils import gd_solver, rmsprop_solver
+from theano_utils import gd_solver, rmsprop_solver, negative_feedback_solver
 import dA
 
 def test_dA_SdA(
@@ -21,7 +21,7 @@ def test_dA_SdA(
     symmetric=False,                           # symmetric 
     corruption_levels=[0.],                    # corruption leves for pretraining
     n_trials=1000,                             # num trials in input data
-    batch_size=20,                             #  batch size for mini-batches
+    batch_size=20,                             # batch size for mini-batches
     tie_weights=True,                          # tie weights in pretraining step
     tie_biases=False,                          # tie biases in pretraining step
     encoder_activation_fn='tanh',              # encoder activation fns, by layer       
@@ -95,7 +95,8 @@ def test_dA_SdA(
         solver_type=pretrain_solver,
         solver_kwargs=pretrain_solver_kwargs)
 
-    if multidA.n_layers == 1:
+    if False and multidA.n_layers == 1:
+
         assert multidA.mlp_layers[0] == multidA.mlp_layers[-1]
         dA_initial_W = multidA.mlp_layers[-1].initial_W
         dA_initial_b = multidA.mlp_layers[-1].initial_b
@@ -129,8 +130,27 @@ def test_dA_SdA(
         predict2 = theano.function( [], y_hat2, givens={ multidA.dA_layers[0].x: train_set_x })
         mse2 = numpy.mean( numpy.sqrt(numpy.sum((train_set_x.get_value() - predict2()) ** 2, axis=1)))
 
-        import pdb
-        pdb.set_trace()
+        n_train_batches = train_set_x.get_value(borrow=True).shape[0]
+        n_train_batches /= batch_size
+    
+        pretraining_fns = multidA.pretraining_functions(train_set_x=train_set_x,
+                                                batch_size=batch_size)
+
+        print('Pretraining step...')
+        for num in range(multidA.n_layers):
+            for epoch in range(pretraining_epochs):
+                c = []
+                for batch_index in range(int(n_train_batches)):
+                    c.append(pretraining_fns[num](index=batch_index))
+                if not epoch % 10:
+                    print('Pre-training layer %i, epoch %d, cost ' % (num, epoch), end=' ')
+                    print(numpy.mean(c))
+            if pretraining_epochs:
+                print('Pre-training layer %i finished, cost ' % (num, ), end=' ')
+                print(numpy.mean(c))
+
+        postpretrain_desc = multidA.describe(train_set_x, title='POST PRETRAIN')
+        
     
     ########################################
     # END SYMMETRIC/NONSYMMETRIC SDA TESTS #
@@ -168,9 +188,6 @@ def test_dA_SdA(
     ############
     # FINETUNE #
     ############
-
-    import pdb
-    pdb.set_trace()
 
     if finetune_solver == 'gd':
         solver = gd_solver(multidA, **finetune_solver_kwargs)
@@ -282,46 +299,62 @@ def test_dA_SdA(
     
 if __name__ == '__main__':
     
-    n_visible = 10
+    n_visible = 100
     n_trials = 1000
     batch_size = 100
-    pretraining_epochs = 10000
+    pretraining_epochs = 1000
     training_epochs = 10000
 
-    dA_layers_sizes = [8, 6]
+    dA_layers_sizes = [45, 40]
     corruption_levels=[0.]
     symmetric=False
 
     tie_weights = False
     tie_biases = False
-    encoder_activation_fn = 'tanh'
-    decoder_activation_fn = 'tanh'
-    global_decoder_activation_fn = 'tanh'
+    # encoder_activation_fn = 'tanh'
+    # decoder_activation_fn = 'tanh'
+    # global_decoder_activation_fn = 'tanh'
+    # encoder_activation_fn = 'sigmoid'
+    # decoder_activation_fn = 'sigmoid'
+    # global_decoder_activation_fn = 'sigmoid'    
+    encoder_activation_fn = 'symmetric_sigmoid'
+    # decoder_activation_fn = 'symmetric_sigmoid'
+    decoder_activation_fn = 'identity'
+    # global_decoder_activation_fn = 'symmetric_sigmoid'
+    global_decoder_activation_fn = 'identity'
 
     initialize_W_as_identity=False
     initialize_W_prime_as_W_transpose = False
     add_noise_to_W = False
     noise_limit = 0.0
 
-    pretrain_solver = 'rmsprop'
-    finetune_solver = 'rmsprop'
-    pretrain_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)
-    finetune_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)
+    # pretrain_solver = 'gd'
+    pretrain_solver = 'negative_feedback'
+    finetune_solver = 'gd'
+    # pretrain_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)
+    # finetune_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)    
+    pretrain_solver_kwargs = dict(learning_rate=0.1)
+    finetune_solver_kwargs = dict(learning_rate=0.1)
     
 
     '''
        Test case non-linear model
-       Gupta DK, Arora Y. Singh UK, Gupta JP (@012) Recursive and colony
+       Gupta DK, Arora Y. Singh UK, Gupta JP (2012) Recursive and colony
        optimization for estimation of parameters of a function
        
     '''
 
     numpy_rng = numpy.random.RandomState(5492)
     
+    # t     = numpy.linspace(0.05, 1.0001, n_visible)
+    # z     = numpy_rng.uniform(low=0.05, high=4.0, size=(n_trials,1))
+    # theta = numpy_rng.uniform(low=0.3, high=1.3, size=(n_trials,1))
+    # x     = (z * numpy.sin(theta)) * t + (t**2 / z) * numpy.cos(theta)
+
     t     = numpy.linspace(0.05, 1.0001, n_visible)
     z     = numpy_rng.uniform(low=0.05, high=4.0, size=(n_trials,1))
-    theta = numpy_rng.uniform(low=0.3, high=1.3, size=(n_trials,1))
-    x     = (z * numpy.sin(theta)) * t + (t**2 / z) * numpy.cos(theta)
+    theta = numpy_rng.uniform(low=-11.3, high=11.3, size=(n_trials,1))
+    x     = (z * numpy.sin(theta)*numpy.sin(theta)) * t * numpy.sqrt(t) + (t**2 / z) * numpy.cos(theta) * numpy.cos(theta)
 
     test_dA_SdA(
         train_set_x0=x,
@@ -341,8 +374,8 @@ if __name__ == '__main__':
         initialize_W_prime_as_W_transpose=initialize_W_prime_as_W_transpose,
         add_noise_to_W=add_noise_to_W,
         noise_limit=noise_limit,
-        pretrain_solver='rmsprop',
-        finetune_solver='rmsprop',
+        pretrain_solver=pretrain_solver,
+        finetune_solver='gd',
         pretraining_epochs=pretraining_epochs,
         pretrain_solver_kwargs=pretrain_solver_kwargs,
         finetune_solver_kwargs=pretrain_solver_kwargs

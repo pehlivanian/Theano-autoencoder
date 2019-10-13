@@ -9,7 +9,7 @@ def elu(x, alpha=1.0):
 # SOLVERS #
 ###########
 
-class solver(object):
+class solver_decorator(object):
     def __init__(self, decorated, *a, **k):
         self.decorated = decorated
 
@@ -23,7 +23,11 @@ class solver(object):
     def compute_cost_updates(self, *a, **k):
         pass
 
-class gd_solver( solver ):
+    def predict(self, *a, **k):
+        z = self.decorated.predict(*a,**k)
+        return z
+        
+class gd_solver( solver_decorator ):
     ''' Gradient descent solver decorator.
 
         :type learning_Rate: float
@@ -65,7 +69,7 @@ class gd_solver( solver ):
         
         '''
 
-        z = self.decorated.predict(*a, **k)
+        z = self.predict(*a, **k)
         if self.cost_fn.upper() == 'MSE':
             L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
         elif self.cost_fn.upper() in [ 'CROSS-ENTROPY', 'CROSS_ENTROPY' ]:
@@ -80,7 +84,7 @@ class gd_solver( solver ):
         return (cost, updates)
         
         
-class rmsprop_solver( solver ):
+class rmsprop_solver( solver_decorator ):
     ''' Rmsprop solver decorator.
 
         :type beta: theano.tensor.scalar
@@ -132,7 +136,7 @@ class rmsprop_solver( solver ):
         
         '''
 
-        z = self.decorated.predict(*a, **k)
+        z = self.predict(*a, **k)
         if self.cost_fn.upper() == 'MSE':
             L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1 ))
         elif self.cost_fn.upper() in [ 'CROSS-ENTROPY', 'CROSS_ENTROPY' ]:
@@ -174,7 +178,7 @@ class rmsprop_solver( solver ):
 
         return (cost, updates)
 
-class neg_feedback_solver( solver ):
+class negative_feedback_solver( solver_decorator ):
     ''' Negative feedback solver decorator.
 
         :type learning_Rate: float
@@ -185,18 +189,23 @@ class neg_feedback_solver( solver ):
 
     def __init__(self,
                  decorated,
-                 learning_rate=0.01,
+                 learning_rate,
                  cost_fn='MSE',
                  *args,
                  **kwargs
                  ):
 
-        super( neg_feedback_solver, self).__init__(decorated)
+        super( negative_feedback_solver, self).__init__(decorated)
         
         self.x = self.decorated.x
         self.y = self.decorated.y
         self.learning_rate = learning_rate
         self.cost_fn = cost_fn
+
+    def predict(self, *a, **k):
+        z = self.decorated.predict_from_input(self.x - self.decorated.predict(*a, **k))        
+        # z = self.decorated.predict_from_input(self.decorated.predict_from_input(self.decorated.predict(*a, **k)))
+        return z
 
     def compute_cost_updates(self, *a, **k):
 
@@ -221,24 +230,19 @@ class neg_feedback_solver( solver ):
         # cost = T.mean(L)
         # grads = T.grad(cost, self.decorated.params)
 
-        # XXX
-        # Works?
-        z = self.decorated.predict_from_input(self.x - self.decorated.predict(*a, **k)) - self.decorated.predict(*a, **k)
-        L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
-        cost = T.mean(L)
-        grads = T.grad(cost, self.decorated.params)
-
-        
+        # Only gd solver for now
+        z = self.predict(*a, **k)
         if self.cost_fn.upper() == 'MSE':
-            L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
+            L = T.sqrt( T.sum( (z) ** 2, axis=1))
         elif self.cost_fn.upper() in [ 'CROSS-ENTROPY', 'CROSS_ENTROPY' ]:
-            L = T.sum( self.y * T.log(z) + (1-self.y) * T.log(1-z), axis=1)
+            L = -T.sum(self.y * T.log(z) + (1 - self.y) * T.log(1-z), axis=1)
+            # L = -T.sum((1 - self.y) * T.log(1-z), axis=1)
         cost = T.mean(L)
-        
+
         grads = T.grad(cost, self.decorated.params)
 
         updates = [ (param, param - self.learning_rate * grad)
                     for param, grad in zip(self.decorated.params, grads) ]
         
         return (cost, updates)
-        
+
