@@ -80,7 +80,7 @@ class gd_solver( solver_decorator ):
 
         updates = [ (param, param - self.learning_rate * grad)
                     for param, grad in zip(self.decorated.params, grads) ]
-        
+
         return (cost, updates)
         
         
@@ -202,9 +202,26 @@ class negative_feedback_solver( solver_decorator ):
         self.learning_rate = learning_rate
         self.cost_fn = cost_fn
 
+    @staticmethod
+    def inv_sigmoid(x):
+        return -T.log( 1. / ( x - 1.) )
+
+    @staticmethod
+    def inv_lmlp(x, W, b):
+        from theano.tensor.nlinalg import matrix_inverse, pinv
+        #  Assume mlp is 
+        
     def predict(self, *a, **k):
-        z = self.decorated.predict_from_input(self.x - self.decorated.predict(*a, **k))        
+        # Only valid for linear case
+        # z = self.decorated.predict(*a, **k)
+        # z = self.decorated.predict_from_input(self.decorated.predict(*a, **k))
+        # z = self.decorated.predict_from_input(self.x - self.decorated.predict(*a, **k))
         # z = self.decorated.predict_from_input(self.decorated.predict_from_input(self.decorated.predict(*a, **k)))
+
+        z = self.decorated.predict_from_input(self.y - self.decorated.predict(*a, **k)) - self.y
+        # for _ in range(20):
+        #     z = self.decorated.predict_from_input(z - self.decorated.predict(*a, **k))
+            
         return z
 
     def compute_cost_updates(self, *a, **k):
@@ -233,7 +250,7 @@ class negative_feedback_solver( solver_decorator ):
         # Only gd solver for now
         z = self.predict(*a, **k)
         if self.cost_fn.upper() == 'MSE':
-            L = T.sqrt( T.sum( (z) ** 2, axis=1))
+            L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
         elif self.cost_fn.upper() in [ 'CROSS-ENTROPY', 'CROSS_ENTROPY' ]:
             L = -T.sum(self.y * T.log(z) + (1 - self.y) * T.log(1-z), axis=1)
             # L = -T.sum((1 - self.y) * T.log(1-z), axis=1)

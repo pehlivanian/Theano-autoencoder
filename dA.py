@@ -17,17 +17,6 @@ from mlp import HiddenLayer
 
 class dA(object):
     ''' Denoising autoencoder, with binomial noise corruption
-
-    .. math::
-
-        \tilde{x} ~ q_D(\tilde{x}|x)                                     (1)
-
-        y = s(W \tilde{x} + b)                                           (2)
-
-        x = s(W' y  + b')                                                (3)
-
-        L(x,z) = -sum_{k=1}^d [x_k \log z_k + (1-x_k) \log( 1-z_k)]      (4)
-
     '''
 
     def __init__(
@@ -43,6 +32,8 @@ class dA(object):
         tie_biases=False,
         initial_W=None,
         initial_b=None,
+        initial_W_prime=None,
+        initial_b_prime=None,
         encoder_activation_fn='tanh',
         decoder_activation_fn='tanh',
         initialize_W_as_identity=False,
@@ -103,17 +94,40 @@ class dA(object):
                              b` = -bW`
                            are necessarily satisfied when the encoding, decoding
                            steps are both purely linear.
+        :type initial_W: numpy.ndarray
+        :param initial_W: initial value for W, or None
+
+        :type initial_b: numpy.ndarray
+        :param initial_b: initial value for b, or None
+
+        :type initial_W_prime: numpy.ndarray
+        :param initial_W_prime: initial value for W_prime, or None
+
+        ;type initial_b_prime: numpy.ndarray
+        :param initial_b_prime: initial value for b_prime, or None
+        
+        :type encoder_activation_fn: str
+        :param encoder_activation_fn: Encoder activation function, applied to input.
+                                      One of 'tanh', 'sigmoid', 'symmetric_sigmoid', 'identity'
+
+        :param decoder_activation_fn: Decoder activation function, applied to output of initial
+                                      encoding step.
+                                      One of 'tanh', 'sigmoid', 'symmetric_sigmoid', 'identity'
 
         :type initialize_W_as_identity: bool
         :param initialize_W_as_identity: initialize W as identity matrix, helpful
                                          for quick convergence in purely linear case.
+
+        :type initialize_W_prime_as_W_transpose: bool
+        :param initialize_W_prime_as_W_transpose: Initialize W_prime as W.T
         
         :type add_noise_to_W: bool
-        :param add_noise_to_W: add noise to initialized W
+        :param add_noise_to_W: add uniform noise to W, only valid for intiialize_W_as_identity=True
 
         :type noise_limit: float
         :param noise_limit: controls upper and lower bounds for uniform noise
-                            corruption of initial W value.
+                            corruption of initial W value, only valid for initialize_W_as_identity=True,
+                            add_noise_t_W=True.
                                       
 
         """
@@ -126,6 +140,8 @@ class dA(object):
         self.initialize_W_prime_as_W_transpose = initialize_W_prime_as_W_transpose        
         self.add_noise_to_W = add_noise_to_W
         self.noise_limit = noise_limit
+        self.initial_W_prime = initial_W_prime
+        self.initial_b_prime = initial_b_prime
 
         self.encoder_activation_fn = encoder_activation_fn
         self.decoder_activation_fn = decoder_activation_fn
@@ -135,7 +151,7 @@ class dA(object):
 
         if not W:
             # theano.config.floatX so that the code is runable on GPU
-            # initialize W with identity - for linear activation + deactivation
+            # initialize W with identity - usually for linear activation + deactivation
             if initial_W is None:
                 if self.initialize_W_as_identity:
                     initial_W = numpy.eye( n_visible, dtype=theano.config.floatX )
@@ -154,12 +170,18 @@ class dA(object):
                     initial_W += numpy_rng.uniform( -1.*self.noise_limit,
                                                     self.noise_limit,
                                                     (n_visible, n_visible))
-
             W = theano.shared(value=initial_W, name='W', borrow=True)
         else:
             initial_W = W.get_value()
-            
-        if not self.tie_weights:
+
+        if self.tie_weights and self.initial_W_prime:
+            raise RuntimeError( 'cannot specify W_prime and also tie to W')
+        if self.tie_weights and self.initialize_W_as_identity:
+            raise RuntimeError( 'cannot specify W_prime and also initialize W_prime')        
+        if self.tie_weights and self.initialize_W_prime_as_W_transpose:
+            raise RuntimeError( 'cannot specify W_prime and also initialize W_prime')        
+
+        if not self.tie_weights:                
             # Initialize W_prime to W`, don't constrain it
             if self.initialize_W_as_identity:
                 initial_W_prime = numpy.eye( n_visible, dtype=theano.config.floatX)
@@ -168,7 +190,7 @@ class dA(object):
                         -1.*self.noise_limit, self.noise_limit, (n_visible, n_visible))
             elif self.initialize_W_prime_as_W_transpose:
                 initial_W_prime = W.get_value().T
-            else:                        
+            elif self.initial_W_prime is None:
                 initial_W_prime = numpy.asarray(
                     numpy_rng.uniform(
                         low=-4 * numpy.sqrt(6. / (n_hidden + n_visible)),
@@ -190,7 +212,7 @@ class dA(object):
                 borrow=True
             )
         else:
-            initial_b = b.get_value()
+            initial_b = b.get_value().copy()
 
 
         if not self.tie_biases:
@@ -204,12 +226,12 @@ class dA(object):
                 borrow=True
                 )
         else:
-            initial_b_prime = b_prime.get_value()
+            initial_b_prime = b_prime.get_value().copy()
             
-        self.initial_W = initial_W
-        self.initial_W_prime = initial_W_prime
-        self.initial_b = initial_b
-        self.initial_b_prime = initial_b_prime
+        self.initial_W = initial_W.copy()
+        self.initial_W_prime = initial_W_prime.copy()
+        self.initial_b = initial_b.copy()
+        self.initial_b_prime = initial_b_prime.copy()
         
         self.W = W
         self.b = b
@@ -236,6 +258,7 @@ class dA(object):
         self.y = self.x 
 
         weight_params = [self.W]
+        
         if not self.tie_weights:
             print('Untied weights; adding W_prime to parameter set')
             weight_params += [self.W_prime]
@@ -246,30 +269,24 @@ class dA(object):
         self.params = weight_params + b_params
 
     def _get_corrupted_input(self, input, corruption_level):
-        """This function keeps ``1-corruption_level`` entries of the inputs the
-        same and zero-out randomly selected subset of size ``coruption_level``
-        Note:   The binomial function return int64 data type by
-                default.  int64 multiplicated by the input
-                type(floatX) always return float64.  To keep all data
-                in floatX when floatX is float32, we set the dtype of
-                the binomial to floatX. As in our case the value of
-                the binomial is always 0 or 1, this don't change the
-                result. This is needed to allow the gpu to work
-                correctly as it only support float32 for now.
-
-        """
+        '''This function keeps ``1-corruption_level`` entries of the inputs the
+        same and zero-out randomly selected subset of size 'coruption_level'
+        '''
         return self.theano_rng.binomial(size=input.shape, n=1,
                                         p=1 - corruption_level,
                                         dtype=theano.config.floatX) * input
 
     def output(self, corruption_level=0.):
+        ''' Outputs hidden values
+        '''
         tilde_x = self._get_corrupted_input(self.x, corruption_level)
         y = self._get_hidden_values(tilde_x)
         return y
 
     def predict(self, corruption_level=0.):
-        ''' Unsupervised problem
+        ''' Prediction for the unsupervised problem
         '''
+        
         tilde_x = self._get_corrupted_input(self.x, corruption_level)        
         y = self._get_hidden_values(tilde_x)
         z = self._get_reconstructed_input(y)
@@ -321,6 +338,8 @@ class dA(object):
 
         y_hat = T.matrix('y_hat')
         y_hat = self.predict()
+        
+        # No updates for the following
         predict = theano.function( [], y_hat, givens={ self.x: train_set_x })
         mse = numpy.mean( numpy.sqrt( numpy.sum( ( train_set_x.get_value() - predict()) ** 2, axis=1)))
 
@@ -334,7 +353,6 @@ class dA(object):
 
         return buff.getvalue()
         
-
 def _prop(a, n):
     return a if hasattr(a, '__iter__') and not isinstance( a, str) else [a] * n
 
@@ -352,15 +370,19 @@ def _get_activation(fn_name):
         raise RuntimeError( 'activation function %s not supported' % (fn_name, ))
 
 class SdA(object):
-    ''' Stacked auto-encoder class, for unsupervised problem. It will produce a
-        symmetric stack of denoising autoencoders with sizes:
+    ''' Stacked auto-encoder class, for unsupervised problem. It will produce an
+        unsymmetric stack of denoising autoencoders with sizes:
 
-              n_visible -> h[0] -> ... -> h[n-1] -> h[n-2] -> ... -> h[0]
+              n_visible -> h[0] -> ... -> h[n-1]
+
+        or a symmetric stack if symmetric=True, with sizes:
+        
+              n_visible -> h[0] -> ... -> h[n-2] -> h[n-1] -> h[n-2] -> ... -> h[0]
 
         where h[i] = dA_layers_sizes[i], the size of the ith hidden layer.
 
         During the pretraining step, each layer will be turned in on itself for the
-        unsupervised learning task. The pre-trained weights and biases are then
+        unsupervised learning task. The pre-trained weights and biases W,b are then
         used as starting points for the finetuning step, which turns the entire
         set in on itself.
 
@@ -373,7 +395,8 @@ class SdA(object):
         as it used in the pretraining phase. The finetuning (actual training of the
         end-to-end model) is handled by a class helper or decorator class.
         
-        Solver types of 'rmsprop' (default) or 'gd' can be specified for pretraining.
+        Solver types of 'rmsprop' (default) or 'gd', etc.,  can be specified for
+        pretraining and finetuning.
         
     '''
     
@@ -385,21 +408,28 @@ class SdA(object):
                  dA_layers_sizes=[392, 196],
                  symmetric=True,
                  global_decoder_activation_fn='tanh',
-                 corruption_levels=None,                  # Iterable or single value across all layers
-                 tie_weights=True,                        # Iterable or single value across all layers 
-                 tie_biases=False,                        # Iterable or single value across all layers
-                 encoder_activation_fn='tanh',            # Iterable or single value across all layers
-                 decoder_activation_fn='tanh',            # Iterable or single value across all layers
-                 initialize_W_as_identity=False,          # Iterable or single value across all layers
-                 initialize_W_prime_as_W_transpose=False, # Iterable or single valu across all layers
-                 add_noise_to_W=True,                     # Iterable or single value across all layers
-                 noise_limit=0.01,                        # Iterable or single value across all layers
-                 solver_type='rmsprop',                   # Iterable or single value across all layers
-                 solver_kwargs={}                         # Iterable or single value across all layers
+                 corruption_levels=None,                  # Iterable, or value broadcast to all layers
+                 tie_weights=True,                        # Iterable, or value broadcast to ll layers 
+                 tie_biases=False,                        # Iterable, or value broadcast to all layers
+                 encoder_activation_fn='tanh',            # Iterable, or value broadcast to all layers
+                 decoder_activation_fn='tanh',            # Iterable, or value broadcast to all layers
+                 initial_W=None,                          # Iterable, or value broadcast to all layers
+                 initial_W_prime=None,                    # Iterable, or value broadcast to all layers
+                 initialize_W_as_identity=False,          # Iterable, or value broadcast to all layers
+                 initialize_W_prime_as_W_transpose=False, # Iterable, or value broadcast to all layers
+                 add_noise_to_W=True,                     # Iterable, or value broadcast to all layers
+                 noise_limit=0.01,                        # Iterable, or value broadcast to all layers
+                 solver_type='rmsprop',                   # Iterable, or value broadcast to all layers
+                 solver_kwargs={}                         # Iterable, or value broadcast to all layers
             ):
 
         n = len(dA_layers_sizes)
         self.symmetric = symmetric
+
+        self.initialize_W_as_identity = initialize_W_as_identity
+        self.initialize_W_prime_as_W_transpose = initialize_W_prime_as_W_transpose
+        self.add_noise_to_W = add_noise_to_W
+        self.noise_limit = noise_limit
 
         self.dA_encoder_tie_weights = _prop(tie_weights, n)
         self.dA_encoder_tie_biases = _prop(tie_biases, n)
@@ -488,17 +518,29 @@ class SdA(object):
             self.x = input
 
         # W_prime
-        initial_W_prime = numpy.asarray(
-            numpy_rng.uniform(
-                low=-4 * numpy.sqrt(6. / (self.n_hidden + self.n_visible)),
-                high=4 * numpy.sqrt(6. / (self.n_hidden + self.n_visible)),
-                size=(self.n_hidden, self.n_visible),
-                ),
-            dtype=theano.config.floatX
-            )
-        
+        if initial_W_prime is None:
+            if self.initialize_W_as_identity:
+                initial_W_prime = numpy.eye( n_visible, dtype=theano.config.floatX)
+                if self.add_noise_to_W:
+                    initial_W_prime += numpy_rng.uniform(
+                        -1.*self.noise_limit, self.nosie_limit, (n_visible, n_visible))
+            elif self.initialize_W_prime_as_W_transpose:
+                initial_W_prime = W.get_value().T
+            else:
+                initial_W_prime = numpy.asarray(
+                    numpy_rng.uniform(
+                        low=-4 * numpy.sqrt(6. / (self.n_hidden + self.n_visible)),
+                        high=4 * numpy.sqrt(6. / (self.n_hidden + self.n_visible)),
+                        size=(self.n_hidden, self.n_visible),
+                        ),
+                    dtype=theano.config.floatX
+                )
+                
         self.W_prime = theano.shared(value=initial_W_prime, name='W_prime', borrow=True)
-
+        
+        self.initial_W = initial_W.copy() if initial_W else None
+        self.initial_W_prime = initial_W_prime.copy()
+        
         # b_prime
         initial_b_prime = numpy.zeros(n_visible, dtype=theano.config.floatX)
         self.b_prime = theano.shared(value=initial_b_prime, name='b_prime', borrow=True)
@@ -508,9 +550,9 @@ class SdA(object):
         # Unsupervised "bombe" training
         self.y = self.x
 
-        #####################################################
-        # Encoder layers: (hidden_layer X n_encoder_layers) #
-        #####################################################
+        ########################
+        # START ENCODER LAYERS #
+        ########################
         for i in range(self.n_encoder_layers):
             if i == 0:
                 input_size = n_visible
@@ -524,6 +566,9 @@ class SdA(object):
 
             mlp_activation = _get_activation(self.dA_encoder_activation_fn[i])
 
+            # a perceptron layer, and one parallel denoising autoencoder layer are set up
+            # The dA layer is only used for the greedy pretraining stage, with weights
+            # shared with the mlp layer.
             dA_layer = dA(numpy_rng=numpy_rng,
                           theano_rng=theano_rng,
                           input=dA_layer_input,
@@ -577,6 +622,7 @@ class SdA(object):
                           tie_biases=self.dA_decoder_tie_biases[i],
                           encoder_activation_fn=self.dA_encoder_activation_fn[i],
                           decoder_activation_fn=self.dA_decoder_activation_fn[i],
+                          initial_W_prime=self.initial_W_prime,
                           initialize_W_as_identity=self.dA_decoder_initialize_W_as_identity[i],
                           initialize_W_prime_as_W_transpose=self.dA_encoder_initialize_W_prime_as_W_transpose[i],
                           add_noise_to_W=self.dA_decoder_add_noise_to_W[i],
@@ -691,7 +737,7 @@ class SdA(object):
         print(title + '%s case' % (sym_str, ), file=buff)
 
         pretraining_fns = self.pretraining_functions(train_set_x=train_set_x,
-                                                     batch_size=train_set_x.get_value().shape[0])
+                                                     batch_size=train_set_x.get_value().shape[0], update=False)
         pretraining_costs = [pretraining_fn(0) for pretraining_fn in pretraining_fns]
 
         y_hat = T.matrix('y_hat')
