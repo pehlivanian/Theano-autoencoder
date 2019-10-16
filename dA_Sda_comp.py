@@ -13,7 +13,7 @@ from theano_utils import gd_solver, rmsprop_solver, negative_feedback_solver
 import dA
 
 # SEED = 1349
-SEED = 42
+SEED = 421
 
 def test_dA_SdA(
     train_set_x0=None,                         # training set
@@ -206,7 +206,8 @@ def test_dA_SdA(
         costs = []
         for batch_index in range(n_batches):
             costs.append(train_da(batch_index))
-        print('Training epoch %d, cost ' % epoch, numpy.mean(costs))
+        if not epoch % 10:
+            print('Training epoch %d, cost ' % epoch, numpy.mean(costs))
 
     da_desc = da.describe(train_set_x, 'DA')
     #############
@@ -225,13 +226,15 @@ def test_dA_SdA(
 
 if __name__ == '__main__':
     
-    n_visible = 50
-    n_trials = 1000
+    n_visible = 100
+    n_trials = 200
     batch_size = 100
     pretraining_epochs = 1000
-    training_epochs = 2500
+    training_epochs = 1000
 
-    dA_layers_sizes = [40]
+    # dA_layers_sizes = [75, 55, 45, 35, 25]
+    # dA_layers_sizes = [80, 79, 78, 77, 76, 75, 74, 73, 72, 71, 70]
+    dA_layers_sizes = [60, 40, 10]
     corruption_levels=[0.]
     symmetric=False
 
@@ -239,7 +242,8 @@ if __name__ == '__main__':
     tie_biases = False
     encoder_activation_fn = 'tanh'
     decoder_activation_fn = 'tanh'
-    global_decoder_activation_fn = 'tanh'
+    # global_decoder_activation_fn = 'tanh'
+    # global_decoder_activation_fn = 'identity'
     # encoder_activation_fn = 'identity'
     # encoder_activation_fn = 'sigmoid'
     # decoder_activation_fn = 'sigmoid'
@@ -249,22 +253,23 @@ if __name__ == '__main__':
     # decoder_activation_fn = 'identity'
     # global_decoder_activation_fn = 'symmetric_sigmoid'
     # global_decoder_activation_fn = 'identity'
+    global_decoder_activation_fn = 'tanh'
 
     initialize_W_as_identity=False
     initialize_W_prime_as_W_transpose = False
     add_noise_to_W = False
     noise_limit = 0.0
 
-    pretrain_solver = 'gd'
+    # pretrain_solver = 'gd'
     # pretrain_solver = 'rmsprop'
-    # pretrain_solver = 'negative_feedback'
-    finetune_solver = 'gd'
-    # finetune_solver = 'rmsprop'
+    pretrain_solver = 'negative_feedback'
+    # finetune_solver = 'gd'
+    finetune_solver = 'rmsprop'
     # finetune_solver = 'negative_feedback'
-    # pretrain_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)
-    # finetune_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)    
+    pretrain_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)
+    finetune_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)    
     pretrain_solver_kwargs = dict(learning_rate=0.1)
-    finetune_solver_kwargs = dict(learning_rate=0.1)
+    # finetune_solver_kwargs = dict(learning_rate=0.1)
     # finetune_solver_kwargs = dict(eta=1.e-4,beta=.7,epsilon=1.e-6)
 
     '''
@@ -281,6 +286,8 @@ if __name__ == '__main__':
     theta = numpy_rng.uniform(low=-11.3, high=11.3, size=(n_trials,1))
     x     = (z * numpy.sin(theta)*numpy.sin(theta)) * t * numpy.sqrt(t) + \
             (t**2 / z) * numpy.cos(theta) * numpy.cos(theta)
+    # Enforce range
+    x     = (x - .5*numpy.max(x))/.5/numpy.max(x)
 
     test_dA_SdA(
         train_set_x0=x,

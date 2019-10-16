@@ -218,16 +218,39 @@ class negative_feedback_solver( solver_decorator ):
         # z = self.decorated.predict_from_input(self.x - self.decorated.predict(*a, **k))
         # z = self.decorated.predict_from_input(self.decorated.predict_from_input(self.decorated.predict(*a, **k)))
 
-        z = self.decorated.predict_from_input(self.y - self.decorated.predict(*a, **k)) - self.y
+        # z = self.decorated.predict_from_input(self.y - self.decorated.predict(*a, **k)) - self.y
         # for _ in range(20):
         #     z = self.decorated.predict_from_input(z - self.decorated.predict(*a, **k))
-            
-        return z
+
+        # Method I - works well
+        # z = self.decorated.predict(*a, **k)
+        # for ind in range(0):
+        #     z = self.decorated.predict_from_input( z - self.y )
+
+        # Method II (set this equal to 0)
+        # z = self.decorated.predict(*a, **k)
+        # for ind in range(2):
+        #     z = self.decorated.predict_from_input( z - self.y )
+
+        # Method III XXX NOT GOOD EXPERIMENTALLY XXX
+        # z = self.decorated.predict(*a, **k)
+        # for ind in range(2):
+        #     z = self.decorated.predict_from_input( z )
+
+        # Method IV
+        # (1 - z + z**2 - z**3 + ...)(z) = z - z**2 + z**3 - z**$ + ...
+        z = self.decorated.predict(*a, **k)
+        z_sum = 0
+        for ind in range(0,7):
+            z_sum = z_sum + ((-1)**ind) * z            
+            z = self.decorated.predict_from_input( z)
+        z_sum = z_sum
+        return z_sum
+
 
     def compute_cost_updates(self, *a, **k):
 
         '''
-
         Negative feedback update
         
         Parameters
@@ -250,7 +273,7 @@ class negative_feedback_solver( solver_decorator ):
         # Only gd solver for now
         z = self.predict(*a, **k)
         if self.cost_fn.upper() == 'MSE':
-            L = T.sqrt( T.sum( (self.y - z) ** 2, axis=1))
+            L = T.sqrt( T.sum( ( self.y - z ) ** 2, axis=1))
         elif self.cost_fn.upper() in [ 'CROSS-ENTROPY', 'CROSS_ENTROPY' ]:
             L = -T.sum(self.y * T.log(z) + (1 - self.y) * T.log(1-z), axis=1)
             # L = -T.sum((1 - self.y) * T.log(1-z), axis=1)
